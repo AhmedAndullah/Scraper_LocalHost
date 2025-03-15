@@ -9,14 +9,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Define the target URLs
-const INITIAL_URL = "https://www.ivena-niedersachsen.de/leitstellenansicht.php?si=0f328b4c5bb6abcf174ed4d87737b02e_01&bereich_id=105001";
-const URL = "https://www.ivena-niedersachsen.de/leitstellenansicht.php?si=0f328b4c5bb6abcf174ed4d87737b02e_01&bereich_id=105001&fb_id=fb00000000260_01";
+const BASE_URL = "https://www.ivena-niedersachsen.de";
+const INITIAL_URL = `${BASE_URL}/leitstellenansicht.php?si=0f328b4c5bb6abcf174ed4d87737b02e_01&bereich_id=105001`;
+const URL = `${BASE_URL}/leitstellenansicht.php?si=0f328b4c5bb6abcf174ed4d87737b02e_01&bereich_id=105001&fb_id=fb00000000260_01`;
 
 // Define absolute paths
 const baseDir = path.resolve(__dirname);
 const publicDir = path.join(baseDir, "public");
 const assetsDir = path.join(publicDir, "assets");
-const tmpDir = process.platform === "win32" ? path.join(baseDir, "tmp") : "/tmp"; // Cross-platform temp directory
+const tmpDir = process.platform === "win32" ? path.join(baseDir, "tmp") : "/tmp";
 
 // Log directories for debugging
 console.log("Base directory:", baseDir);
@@ -46,18 +47,15 @@ async function getBrowser() {
       userDataDir: path.join(tmpDir, "puppeteer_user_data"),
     };
 
-    // Detect if running locally (Windows) or on Vercel
     if (process.platform === "win32") {
-      // Use puppeteer (full version) locally
       const puppeteer = require("puppeteer");
       executablePath = (await puppeteer.executablePath()) || undefined;
       if (!executablePath) {
         throw new Error("Puppeteer executable path not found. Please run 'npm install' to download Chromium.");
       }
       console.log("✅ Using local Puppeteer executable:", executablePath);
-      launchOptions.args = ["--no-sandbox", "--disable-setuid-sandbox"]; // Sandbox flags for Windows
+      launchOptions.args = ["--no-sandbox", "--disable-setuid-sandbox"];
     } else {
-      // Use chrome-aws-lambda on Vercel or other Unix-like environments
       executablePath = await chromium.executablePath;
       if (!executablePath) throw new Error("Chromium executable path not found");
       console.log("✅ Using chrome-aws-lambda executable:", executablePath);
@@ -77,19 +75,29 @@ async function getBrowser() {
 // Function to download a resource
 async function downloadResource(url, filePath) {
   try {
+    // Ensure the URL is absolute
+    const absoluteUrl = url.startsWith("http") ? url : `${BASE_URL}/${url.replace(/^\//, "")}`;
+    console.log(`⬇️ Downloading ${absoluteUrl} to ${filePath}`);
     const response = await axios({
-      url,
+      url: absoluteUrl,
       method: "GET",
       responseType: "stream",
     });
     const writer = fs.createWriteStream(filePath);
     response.data.pipe(writer);
     return new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
+      writer.on("finish", () => {
+        console.log(`✅ Downloaded ${absoluteUrl} to ${filePath}`);
+        resolve();
+      });
+      writer.on("error", (err) => {
+        console.error(`❌ Failed to save ${absoluteUrl} to ${filePath}: ${err.message}`);
+        reject(err);
+      });
     });
   } catch (error) {
     console.error(`❌ Failed to download ${url}: ${error.message}`);
+    throw error;
   }
 }
 
@@ -111,7 +119,7 @@ async function scrapeWebsite() {
     );
     console.log("🔍 anonymous_oe options:", anonymousOeOptions);
     await page.select("#anonymous_oe", "73201"); // Value for "Region Hannover"
-    await page.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 }); // Wait for onchange event to complete
+    await page.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 });
 
     // Step 2: Navigate to "Innere Medizin" by clicking the appropriate link
     console.log("🔧 Navigating to 'Innere Medizin'...");
@@ -158,11 +166,7 @@ async function scrapeWebsite() {
     // Wait for the page to fully load after navigation
     await page.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 });
 
-    // Remove the navigation to URL since we’ve already navigated via links
-    // console.log("✅ Navigating to:", URL);
-    // await page.goto(URL, { waitUntil: "networkidle2", timeout: 30000 });
-
-    // Extract external resources
+    // Extract external resources (for reference, but skip downloading)
     const resources = await page.evaluate(() => {
       const urls = new Set();
       document.querySelectorAll("link[href], script[src], img[src]").forEach((element) => {
@@ -174,21 +178,21 @@ async function scrapeWebsite() {
 
     console.log("🔹 External resources found:", resources);
 
-    // Download resources and map original URLs to local paths
+    // Map original URLs to local paths without downloading (rely on pre-downloaded assets)
     const urlToLocalPath = new Map();
     for (const resourceUrl of resources) {
       const fileName = path.basename(resourceUrl.split("?")[0]).toLowerCase();
       const localPath = path.join(assetsDir, fileName);
       const localUrl = `/assets/${fileName}`;
 
-      if (!fs.existsSync(localPath)) {
-        await downloadResource(resourceUrl, localPath);
-      } else {
+      if (fs.existsSync(localPath)) {
         console.log(`✅ File exists: ${localPath}`);
+      } else {
+        console.warn(`⚠️ File not found: ${localPath} (using pre-downloaded assets)`);
       }
 
       const baseUrl = resourceUrl.startsWith("http")
-        ? resourceUrl.replace("https://www.ivena-niedersachsen.de", "").toLowerCase()
+        ? resourceUrl.replace(BASE_URL, "").toLowerCase()
         : resourceUrl.toLowerCase();
       urlToLocalPath.set(resourceUrl.toLowerCase(), localUrl);
       urlToLocalPath.set(baseUrl, localUrl);
@@ -213,22 +217,6 @@ async function scrapeWebsite() {
 
     console.log(`🔍 Total replacements made: ${totalReplacements}`);
     console.log("🔍 Updated HTML snippet (after replacement):", htmlContent.slice(0, 500));
-
-    for (const [originalUrl, localUrl] of urlToLocalPath) {
-      if (originalUrl.endsWith(".js")) {
-        const fileName = path.basename(originalUrl.split("?")[0]).toLowerCase();
-        const filePath = path.join(assetsDir, fileName);
-        if (fs.existsSync(filePath)) {
-          let jsContent = fs.readFileSync(filePath, "utf8");
-          fs.writeFileSync(filePath, jsContent, "utf8");
-          console.log(`✅ Modified JavaScript file: ${filePath}`);
-        }
-      }
-    }
-
-    // const scrapedHtmlPath = path.join(publicDir, "scraped.html");
-    // fs.writeFileSync(scrapedHtmlPath, htmlContent, "utf8");
-    // console.log(`✅ Scraped HTML saved to: ${scrapedHtmlPath}`);
 
     return htmlContent;
   } catch (error) {
@@ -258,7 +246,7 @@ app.use("/assets", express.static(assetsDir, {
 // Serve the public directory
 app.use(express.static(publicDir));
 
-// Root route to trigger scraping or serve cached HTML
+// Root route to trigger scraping
 app.get("/", async (req, res) => {
   try {
     const content = await scrapeWebsite();

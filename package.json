@@ -1,24 +1,24 @@
 {
-    "name": "scraper-2.0",
-    "version": "1.0.0",
-    "description": "A web scraper using Puppeteer and Express for deployment on Vercel",
-    "main": "server.js",
-    "scripts": {
-      "start": "node server.js",
-      "build": "npm install"
-    },
-    "dependencies": {
-      "axios": "^1.8.3",
-      "chrome-aws-lambda": "^23.11.0",
-      "express": "^4.21.2",
-      "puppeteer-core": "^23.11.0"
-    },
-    "devDependencies": {
-      "puppeteer": "^23.11.0"
-    },
-    "engines": {
-      "node": "18.x"
-    },
-    "author": "",
-    "license": "ISC"
-  }
+  "name": "scraper-2.0",
+  "version": "1.0.0",
+  "description": "A web scraper using Puppeteer and Express for deployment on Vercel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "npm install"
+  },
+  "dependencies": {
+    "axios": "^1.8.3",
+    "chrome-aws-lambda": "^10.1.0",
+    "express": "^4.21.2",
+    "puppeteer-core": "^10.1.0"
+  },
+  "devDependencies": {
+    "puppeteer": "^10.1.0"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "author": "",
+  "license": "ISC"
+}
